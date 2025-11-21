@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>글쓰기 과정 시선추적 및 로그 수집</title>
+    
+    <script src="https://unpkg.com/jspsych@7.3.4"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-html-button-response@1.1.3"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-webgazer-init-camera@1.0.3"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-webgazer-calibrate@1.0.3"></script>
+    <script src="https://unpkg.com/@jspsych/extension-webgazer@1.0.3"></script>
+    <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+    
+    <link href="https://unpkg.com/jspsych@7.3.4/css/jspsych.css" rel="stylesheet" type="text/css" />
+    
+    <style>
+        /* 글쓰기 화면 디자인 */
+        body { font-family: 'Nanum Gothic', 'Malgun Gothic', sans-serif; }
+        .instruction { font-size: 1.2rem; margin-bottom: 20px; line-height: 1.5; }
+        
+        #writing-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        #writing-area {
+            width: 900px;       /* 입력창 너비 */
+            height: 500px;      /* 입력창 높이 */
+            font-size: 18px;
+            padding: 20px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
+            resize: none;       /* 크기 조절 방지 */
+            outline: none;
+        }
+        
+        #writing-area:focus {
+            border-color: #4CAF50; /* 입력 중일 때 테두리 색 */
+        }
+    </style>
+</head>
+<body></body>
+<script>
+
+    // 2. jsPsych 초기화 (WebGazer 확장 기능 활성화)
+    const jsPsych = initJsPsych({
+        extensions: [
+            { type: jsPsychExtensionWebgazer }
+        ]
+    });
+
+    // 실험 타임라인 배열 생성
+    var timeline = [];
+
+    // 3. 카메라 권한 요청 및 초기화 단계
+    var init_camera = {
+        type: jsPsychWebgazerInitCamera,
+        instructions: `
+            <h3>[1단계] 카메라 설정</h3>
+            <p>연구 참여를 환영합니다.</p>
+            <p>이 실험은 여러분의 시선 움직임과 글쓰기 과정을 분석합니다.</p>
+            <p>브라우저 상단의 <b>[허용]</b> 버튼을 눌러 웹캠을 켜주세요.</p>
+            <p>카메라가 켜지고 얼굴이 인식되면 버튼을 클릭하세요.</p>
+        `
+    };
+    timeline.push(init_camera);
+
+    // 4. 시선 보정 (Calibration) 단계 - 정확도 향상
+    var calibration = {
+        type: jsPsychWebgazerCalibrate,
+        calibration_points: [
+            [20,20], [50,20], [80,20],
+            [20,50], [50,50], [80,50],
+            [20,80], [50,80], [80,80]
+        ], // 화면을 9분할하여 보정
+        repetitions_per_point: 1,
+        randomize_calibration_order: true,
+        instructions: `
+            <h3>[2단계] 시선 정확도 보정</h3>
+            <p>화면에 나타나는 <b>검은 점</b>을 눈으로 똑바로 쳐다보며 클릭해주세요.</p>
+            <p>점이 <span style="color:orange; font-weight:bold;">노란색</span>으로 변할 때까지 클릭해야 합니다.</p>
+            <p>머리를 고정하고 눈동자만 움직여주세요.</p>
+        `
+    };
+    timeline.push(calibration);
+
+    // 5. [핵심] 글쓰기 과제 및 로그 수집
+    var writing_task = {
+        type: jsPsychHtmlButtonResponse,
+        stimulus: `
+            <div id="writing-container">
+                <div class="instruction">
+                    <b>📝 주제: "내가 가장 좋아하는 장소와 그 이유"</b><br>
+                    <span style="font-size: 0.9rem; color: gray;">(자유롭게 글을 작성한 뒤, 작성이 끝나면 아래 [제출하기] 버튼을 누르세요.)</span>
+                </div>
+                <textarea id="writing-area" placeholder="여기에 글을 작성하세요..."></textarea>
+            </div>
+        `,
+        choices: ['제출하기'],
+        extensions: [
+            {
+                type: jsPsychExtensionWebgazer, 
+                params: { targets: ['#writing-area'] } // 글쓰기 영역에 대한 시선 추적 활성화
+            }
+        ],
+        on_load: function() {
+            // 화면이 뜨자마자 키보드 입력을 감시하는 '리스너'를 부착합니다.
+            const textarea = document.getElementById('writing-area');
+            
+            // 글자가 입력될 때마다 실행됨
+            textarea.addEventListener('input', (e) => {
+                var currentTime = performance.now(); // 현재 시간(ms)
+                
+                // jsPsych 데이터에 한 줄씩 기록
+                jsPsych.data.write({
+                    task: 'keystroke_log',      // 데이터 구분용 태그
+                    time_elapsed: currentTime,  // 입력 시간
+                    event_type: e.inputType,    // 입력 유형 (insertText, deleteContentBackward 등)
+                    input_char: e.data,         // 입력한 글자 (null이면 지우기 등 특수키)
+                    full_text_length: textarea.value.length // 현재 전체 글자 수
+                });
+            });
+        }
+    };
+    timeline.push(writing_task);
+
+    // 6. 실험 종료 후 데이터 분리 저장 (가장 중요한 부분!)
+    jsPsych.run(timeline).then(function() {
+        
+        // --- [파일 1] 글쓰기 로그 저장 (writing_log.csv) ---
+        // 시선 데이터를 제외하고 순수 로그만 저장합니다.
+        var log_data = jsPsych.data.get().ignore('webgazer_data');
+        log_data.localSave('csv', 'writing_log.csv');
+
+        // --- [파일 2] 시선 데이터 저장 (eye_gaze_data.csv) ---
+        // 글쓰기 단계에서 수집된 방대한 시선 좌표만 따로 추출합니다.
+        
+        // 'html-button-response' 타입(글쓰기 과제)의 데이터만 찾음
+        var trials = jsPsych.data.get().filter({type: 'html-button-response'}).values();
+        
+        if (trials.length > 0 && trials[0].webgazer_data) {
+            var gaze_array = trials[0].webgazer_data; // 시선 데이터 뭉치
+            
+            // CSV 헤더 만들기
+            var csvContent = "time_ms,x,y\n";
+            
+            // 뭉치를 한 줄씩 풀어서 CSV 문자열로 변환
+            for (var i = 0; i < gaze_array.length; i++) {
+                var row = gaze_array[i];
+                // 시간, x좌표, y좌표 순서로 기록
+                csvContent += Math.round(row.t) + "," + Math.round(row.x) + "," + Math.round(row.y) + "\n";
+            }
+
+            // 브라우저 강제 다운로드 실행 (blob 활용)
+            var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            var link = document.createElement("a");
+            if (link.download !== undefined) {
+                var url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "eye_gaze_data.csv"); // 파일명 설정
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        } else {
+            alert("주의: 시선 데이터가 수집되지 않았습니다. (웹캠 권한 혹은 조명 문제 확인)");
+        }
+        
+        // 실험 종료 메시지
+        document.body.innerHTML = `<div style="text-align:center; margin-top:100px;">
+            <h2>실험이 종료되었습니다.</h2>
+            <p>다운로드된 2개의 csv 파일을 확인해주세요.</p>
+            <p>참여해주셔서 감사합니다.</p>
+        </div>`;
+    });
+
+</script>
+</html>
